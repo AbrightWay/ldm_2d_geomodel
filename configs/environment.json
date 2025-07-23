@@ -1,0 +1,7 @@
+{
+    "imgs_dir": "./data/imgs/",
+    "log_dir": "./logs",
+    "trained_vae_dir": "./trained_vae",
+    "trained_unet_dir": "./trained_unet",
+    "resume_ckpt": false
+}
