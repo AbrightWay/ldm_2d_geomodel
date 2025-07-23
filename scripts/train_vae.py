@@ -172,6 +172,9 @@ train_logs = {
     "log_kl_losses": log_kl_losses,
     "log_hd_losses": log_hd_losses,
     "val_losses": val_losses,
+    "val_recon_losses": val_recon_loss,
+    "val_kl_losses": val_kl_loss,
+    "val_hd_losses": val_hd_loss,
     "total_time": time.time() - start_time
 }
 
