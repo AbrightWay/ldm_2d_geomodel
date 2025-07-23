@@ -12,8 +12,8 @@ import cv2
 from datasets import Dataset
 
 # Set directories for dataset and .jpg images folder
-dataset_dir = '../data/diffusers_dataset/'
-imgs_dir = '../imgs/'
+dataset_dir = './data/diffusers_dataset/'
+imgs_dir = './data/imgs/'
 
 if not os.path.exists(imgs_dir):
     os.makedirs(imgs_dir)
