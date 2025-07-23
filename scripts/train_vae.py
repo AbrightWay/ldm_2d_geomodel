@@ -134,7 +134,7 @@ for epoch in range(n_epochs):
 
     if (epoch + 1) % val_interval == 0:
         autoencoderkl.eval()
-        val_loss = 0
+        val_loss, val_recon_loss, val_kl_loss, val_hd_loss = 0, 0, 0, 0
         with torch.no_grad():
             for val_step, batch in enumerate(m_val_loader, start=1):
                 m_batch = batch["image"].to(device)
@@ -142,23 +142,30 @@ for epoch in range(n_epochs):
                 with torch.amp.autocast(device_str,enabled=True):
                     reconstruction, z_mu, z_sigma = autoencoderkl(m_batch)
                     recons_loss = F.l1_loss(reconstruction.float(), m_batch.float())
-
+                    val_recon_loss += recons_loss.item()
+                    
                     hd_loss =  hard_data_loss_func(reconstruction, m_batch, hard_data_locations) if hd_weight > 0 else 0.0
-
+                    val_hd_loss += hd_loss.item() * hd_weight if hd_weight > 0 else 0.0
+                    
                     kl_loss = 0.5 * torch.sum(z_mu.pow(2) + z_sigma.pow(2) - torch.log(z_sigma.pow(2)) - 1, dim=[1, 2, 3])
                     kl_loss = torch.sum(kl_loss) / kl_loss.shape[0]
-
+                    val_kl_loss += kl_loss.item() * kl_weight if kl_weight > 0 else 0.0
+                    
                     loss_g = recons_loss + (kl_weight * kl_loss) + (hd_weight * hd_loss)
 
 
                 val_loss += loss_g.item()
-
         val_loss /= val_step
+        val_recon_loss /= val_step
+        val_kl_loss /= val_step
+        val_hd_loss /= val_step
+        
         val_losses.append(val_loss)
-        print(f"epoch {epoch + 1} val loss: {val_loss:.4f}")
+        print(f"Epoch {epoch + 1}:")
+        print(f" Total val loss: {val_loss}, Recon loss: {val_recon_loss}, KL loss: {val_kl_loss}, HD loss: {val_hd_loss}")
         if val_loss < min(val_losses):
             torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' + f'/vae_epoch_{epoch + 1}_hd{hd_str}_best.pt')
-            print(f"Best model saved at epoch {epoch + 1} with val loss: {val_loss:.4f}")
+            print(f"Best model saved at epoch {epoch + 1} with val loss: {val_loss}")
 train_logs = {
     "epoch_losses": epoch_losses,
     "log_recons_losses": log_recons_losses,
