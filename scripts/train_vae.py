@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from utils import *
 # Monai and diffusers modules
-
+torch.backends.cudnn.benchmark = True
 from monai.utils import set_determinism
 
 
