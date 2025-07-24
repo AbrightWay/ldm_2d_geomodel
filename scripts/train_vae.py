@@ -76,7 +76,8 @@ scaler = torch.amp.GradScaler(device = device)
 # Training loop
 
 epoch_losses, log_recons_losses, log_kl_losses, log_hd_losses = [], [], [], []
-val_losses   = []
+val_losses, val_recon_losses, val_kl_losses, val_hd_losses = [], [], [], []
+best_val_loss = 100.
 device_str = "cuda" if device.type == "cuda" else "cpu"
 start_time = time.time()
 for epoch in range(n_epochs):
@@ -161,26 +162,32 @@ for epoch in range(n_epochs):
         val_hd_loss /= val_step
         
         val_losses.append(val_loss)
+        val_recon_losses.append(val_recon_loss)
+        val_kl_losses.append(val_kl_loss)
+        val_hd_losses.append(val_hd_loss)
+        
         print(f"Epoch {epoch + 1}:")
         print(f" Total val loss: {val_loss}, Recon loss: {val_recon_loss}, KL loss: {val_kl_loss}, HD loss: {val_hd_loss}")
-        if val_loss < min(val_losses):
-            torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' + f'/vae_epoch_{epoch + 1}_hd{hd_str}_best.pt')
-            print(f"Best model saved at epoch {epoch + 1} with val loss: {val_loss}")
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' + f'/vae_epoch_hd{hd_str}_best.pt')
+            print(f"Best model saved at epoch {epoch + 1} with val loss: {best_val_loss}")
+end_time = time.time()
 train_logs = {
     "epoch_losses": epoch_losses,
     "log_recons_losses": log_recons_losses,
     "log_kl_losses": log_kl_losses,
     "log_hd_losses": log_hd_losses,
     "val_losses": val_losses,
-    "val_recon_losses": val_recon_loss,
-    "val_kl_losses": val_kl_loss,
-    "val_hd_losses": val_hd_loss,
-    "total_time": time.time() - start_time
+    "val_recon_losses": val_recon_losses,
+    "val_kl_losses": val_kl_losses,
+    "val_hd_losses": val_hd_losses,
+    "total_time": end_time - start_time
 }
 
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
 with open(os.path.join(args.log_dir, f"vae_training_log_epochs{n_epochs}_hd{hd_str}.json"), "w") as f:
     json.dump(train_logs, f)
-
+print(f"Total training time: {(end_time - start_time)//3600}h {(end_time - start_time)%3600//60}m {(end_time - start_time)%60}s")
 progress_bar.close()
