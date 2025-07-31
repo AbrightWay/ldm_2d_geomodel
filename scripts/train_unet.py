@@ -9,13 +9,12 @@ Note: requires Python package "monai" or "monai-generative" to load 2D U-net mod
 # Import packages
 
 # General imports
-import os
+import os, json, time, argparse
 import numpy as np
 import shutil
 import tempfile
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 from sklearn.metrics import mean_squared_error
 from PIL import Image 
@@ -30,133 +29,96 @@ from monai.utils import first, set_determinism
 from generative.inferers import LatentDiffusionInferer
 from generative.networks.nets import AutoencoderKL, DiffusionModelUNet
 from generative.networks.schedulers import DDPMScheduler, DDIMScheduler
+from utils import *
+
+set_determinism(42)
+
+parser = argparse.ArgumentParser(description="PyTorch Object Detection Training")
+parser.add_argument(
+    "-e",
+    "--environment-file",
+    default="./config/environment.json",
+    help="environment json file that stores environment path",
+)
+parser.add_argument(
+    "-c",
+    "--config-file",
+    default="./config/config_train_16g.json",
+    help="config json file that stores hyper-parameters",
+)
+args = parser.parse_args()
+env_dict = json.load(open(args.environment_file, "r"))
+config_dict = json.load(open(args.config_file, "r"))
+for k, v in env_dict.items():
+    setattr(args, k, v)
+for k, v in config_dict.items():
+    setattr(args, k, v)
+
 
 # Set directories
-imgs_dir          =  '../data/imgs/'
-trained_unet_dir = '../trained_unet/'
 
-if not os.path.exists(trained_unet_dir):
-    os.makedirs(trained_unet_dir)
+if not os.path.exists(args.trained_unet_dir):
+    os.makedirs(args.trained_unet_dir)
     
 # Choose device
 #device = torch.device("cpu")
-device = torch.device("cuda")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 
 # Load dataset
-geomodels_dataset = [{"image": imgs_dir + img} for  img in os.listdir(imgs_dir)][:4000]
-N_data            = len(geomodels_dataset)
-image_size        = 64
+args.autoencoder_train['batch_size'] = args.diffusion_train['batch_size'] # Re-define the batch size for prepare_geomodels_dataset function as the function uses args.autoencoder_train['batch_size'] to define the batch size of the dataloaders
+m_train_loader, m_val_loader = prepare_geomodels_dataset(args)
 
-
-# Split dataset
-train_split       = 0.7
-val_split         = 0.2
-test_split        = 1 - train_split - val_split
-batch_size        = 16
-
-m_train_list    = geomodels_dataset[:int(N_data*train_split)]
-m_val_list      = geomodels_dataset[int(len(m_train_list)):int(N_data*(1-test_split))+1]
-m_test_list     = geomodels_dataset[int(-N_data*test_split):]
-
-# Transform dataset
-
-# Training set
-train_transforms = transforms.Compose(
-    [
-        transforms.LoadImaged(keys=["image"]),
-        transforms.EnsureChannelFirstd(keys=["image"]),
-        transforms.ScaleIntensityRanged(keys=["image"], a_min=0.0, a_max=255.0, b_min=0.0, b_max=1.0, clip=True)]
-)
-
-m_train_ds = Dataset(data=m_train_list, transform=train_transforms)
-m_train_loader = DataLoader(m_train_ds, batch_size=batch_size, shuffle=True)
-
-# Validation set
-val_transforms = transforms.Compose(
-    [
-        transforms.LoadImaged(keys=["image"]),
-        transforms.EnsureChannelFirstd(keys=["image"]),
-        transforms.ScaleIntensityRanged(keys=["image"], a_min=0.0, a_max=255.0, b_min=0.0, b_max=1.0, clip=True),
-    ]
-)
-m_val_ds = Dataset(data=m_val_list, transform=val_transforms)
-m_val_loader = DataLoader(m_val_ds, batch_size=batch_size, shuffle=True)
-
-# Testing set
-test_transforms = transforms.Compose(
-    [
-        transforms.LoadImaged(keys=["image"]),
-        transforms.EnsureChannelFirstd(keys=["image"]),
-        transforms.ScaleIntensityRanged(keys=["image"], a_min=0.0, a_max=255.0, b_min=0.0, b_max=1.0, clip=True),
-    ]
-)
-
-m_test_ds = Dataset(data=m_test_list, transform=val_transforms)
-m_test_loader = DataLoader(m_test_ds, batch_size=batch_size, shuffle=True)
 
 
 
 # Initiate variational autoendocder (VAE) model and load pre-trained weights
-trained_vae_dir = '../trained_vae/'
-trained_vae_weights = trained_vae_dir + '/vae_epoch_1.pt'
+trained_vae_dir = args.trained_vae_dir
+trained_vae_weights = trained_vae_dir + '/vae_epoch_1000_hd10.pt'
 
-autoencoderkl = AutoencoderKL(
-                spatial_dims=2,
-                in_channels=1,
-                out_channels=1,
-                num_channels=(128, 128, 256, 512),
-                latent_channels=1,
-                num_res_blocks=1, 
-                                )
-autoencoderkl = autoencoderkl.to(device)
+autoencoderkl = define_instance(args, "autoencoder_def").to(device)
 checkpoint    = torch.load(trained_vae_weights)
 autoencoderkl.load_state_dict(checkpoint)
 autoencoderkl.eval()
 
 # Initiate U-net model
-unet = DiffusionModelUNet(
-    spatial_dims=2,
-    in_channels=1,
-    out_channels=1,
-    num_res_blocks=1,
-    num_channels=(64, 128, 256),
-    attention_levels=(False, True, True),
-    num_head_channels=(0, 64, 128),
-)
-unet.to(device)
+unet = define_instance(args, "diffusion_def").to(device)
 
 
 # Set noise scheduler to use for forward (noising) process
-scheduler = DDPMScheduler(num_train_timesteps=1000, schedule="linear_beta", beta_start=0.0001, beta_end=0.02)
+scheduler = DDPMScheduler(num_train_timesteps=args.NoiseScheduler['num_train_timesteps'], schedule="linear_beta", beta_start=args.NoiseScheduler['beta_start'], beta_end=args.NoiseScheduler['beta_end'])
 #scheduler = DDIMScheduler(num_train_timesteps=100, schedule="linear_beta", beta_start=0.0001, beta_end=0.02)
 
 # Compute scaling factor for non-perfectly Gaussian VAE latent spaces
 example_data = first(m_train_loader)
+device_str = "cuda" if device.type == "cuda" else "cpu"
 
 with torch.no_grad():
-    with autocast(enabled=True):
+    with torch.amp.autocast(device_str,enabled=True):
         z = autoencoderkl.encode_stage_2_inputs(example_data["image"].to(device))
 
 scale_factor = 1 / torch.std(z)
 
 
 inferer = LatentDiffusionInferer(scheduler, scale_factor=scale_factor)
-optimizer = torch.optim.Adam(unet.parameters(), lr=1e-4)
+optimizer = torch.optim.Adam(unet.parameters(), lr=args.diffusion_train['lr'])
 
 
 
 # Training parameters
-n_epochs      = 10
-val_interval  = 5
-save_interval = 10
+n_epochs      = args.diffusion_train['max_epochs']
+val_interval  = args.diffusion_train['val_interval']
+save_interval = args.diffusion_train['save_interval']
 
 # Train the U-net on the noise predicting function
 
 epoch_losses  = []
 val_losses    = []
-scaler        = GradScaler()
+scaler        = torch.amp.GradScaler(device = device)
+best_val_loss = 100.
+start_time    = time.time()
+
 
 for epoch in range(n_epochs):
     unet.train()
@@ -169,7 +131,7 @@ for epoch in range(n_epochs):
         images = batch["image"].to(device)
         optimizer.zero_grad(set_to_none=True)
         
-        with autocast(enabled=True):
+        with torch.amp.autocast(device_str,enabled=True):
             z_mu, z_sigma = autoencoderkl.encode(images)
             z = autoencoderkl.sampling(z_mu, z_sigma) 
             
@@ -191,8 +153,8 @@ for epoch in range(n_epochs):
         progress_bar.set_postfix({"loss": epoch_loss / (step + 1)})
     epoch_losses.append(epoch_loss / (step + 1))
     
-    if (epoch + 1) % 10 == 0:
-        torch.save(unet.state_dict(), f'{trained_unet_dir}' + f'/unet_epoch_{epoch + 1}.pt')
+    # if (epoch + 1) % args.diffusion_train['save_interval'] == 0:
+    #     torch.save(unet.state_dict(), f'{args.trained_unet_dir}' + f'/unet_epoch_{epoch + 1}.pt')
 
     if (epoch + 1) % val_interval == 0:
         unet.eval()
@@ -201,7 +163,7 @@ for epoch in range(n_epochs):
             for val_step, batch in enumerate(m_val_loader, start=1):
                 images = batch["image"].to(device)
 
-                with autocast(enabled=True):
+                with torch.amp.autocast(device_str,enabled=True):
                     z_mu, z_sigma = autoencoderkl.encode(images)
                     z = autoencoderkl.sampling(z_mu, z_sigma)
 
@@ -223,4 +185,18 @@ for epoch in range(n_epochs):
         val_loss /= val_step
         val_losses.append(val_loss)
         print(f"Epoch {epoch} val loss: {val_loss:.4f}")
+        # if val_loss < best_val_loss:
+        #     best_val_loss = val_loss
+        #     torch.save(unet.state_dict(), f'{args.trained_unet_dir}' + f'/unet_best.pt')
+        #     print(f"New best model saved with val loss: {best_val_loss:.4f} at epoch {epoch + 1}")
+end_time = time.time()
+print(f"Total training time: {(end_time - start_time)//3600}h {(end_time - start_time)%3600//60}m {(end_time - start_time)%60}s")
+train_logs = {
+    "epoch_losses": epoch_losses,
+    "val_losses": val_losses,
+    "best_val_loss": best_val_loss,
+    "total_time": end_time - start_time
+}
+# with open(os.path.join(args.log_dir, f"unet_training_log_epochs{n_epochs}.json"), "w") as f:
+#     json.dump(train_logs, f)
 progress_bar.close()
