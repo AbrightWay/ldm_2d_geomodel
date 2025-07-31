@@ -87,7 +87,7 @@ for epoch in range(n_epochs):
     epoch_kl_loss = 0
     epoch_hd_loss = 0
     epoch_loss = 0
-    progress_bar = tqdm(enumerate(m_train_loader), total=len(m_train_loader), ncols=200)
+    progress_bar = tqdm(enumerate(m_train_loader), total=len(m_train_loader), ncols=125)
     progress_bar.set_description(f"Epoch {epoch}")
 
     for step, batch in progress_bar:
