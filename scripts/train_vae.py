@@ -14,7 +14,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-from utils import *
+from utils_main import *
 # Monai and diffusers modules
 torch.backends.cudnn.benchmark = True
 from monai.utils import set_determinism
@@ -52,7 +52,7 @@ set_determinism(1561)
 
 
 # Load dataset
-m_train_loader, m_val_loader = prepare_geomodels_dataset(args)
+m_train_loader, m_val_loader,_ = prepare_conditional_geomodel_dataset(args)
 
 # Set hard data conditioning points (first two coordinates are (x,y) points and third coordinate the pixel value)
 hard_data_locations = np.array(args.autoencoder_train['hd_locs'])
@@ -90,8 +90,8 @@ for epoch in range(n_epochs):
     progress_bar = tqdm(enumerate(m_train_loader), total=len(m_train_loader), ncols=125)
     progress_bar.set_description(f"Epoch {epoch}")
 
-    for step, batch in progress_bar:
-        m_batch = batch["image"].to(device)
+    for step, (batch,_,_) in progress_bar:
+        m_batch = batch.to(device)
         optimizer.zero_grad(set_to_none=True)
 
         with torch.amp.autocast(device_str,enabled=True):
@@ -137,8 +137,8 @@ for epoch in range(n_epochs):
         autoencoderkl.eval()
         val_loss, val_recon_loss, val_kl_loss, val_hd_loss = 0, 0, 0, 0
         with torch.no_grad():
-            for val_step, batch in enumerate(m_val_loader, start=1):
-                m_batch = batch["image"].to(device)
+            for val_step, (batch,_,_) in enumerate(m_val_loader, start=1):
+                m_batch = batch.to(device)
 
                 with torch.amp.autocast(device_str,enabled=True):
                     reconstruction, z_mu, z_sigma = autoencoderkl(m_batch)
@@ -166,7 +166,7 @@ for epoch in range(n_epochs):
         val_kl_losses.append(val_kl_loss)
         val_hd_losses.append(val_hd_loss)
         
-        print(f"Epoch {epoch + 1}:")
+        print(f"Epoch {epoch}:")
         print(f" Total val loss: {val_loss}, Recon loss: {val_recon_loss}, KL loss: {val_kl_loss}, HD loss: {val_hd_loss}")
         if val_loss < best_val_loss:
             best_val_loss = val_loss
