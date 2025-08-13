@@ -70,6 +70,26 @@ hard_data_locations = np.array(args.autoencoder_train['hd_locs'])
 
 # Initiate variational autoendocder (VAE) model
 autoencoderkl = define_instance(args, "autoencoder_def").to(device)
+# Gradient parameters (optimizer and scaler)
+optimizer = torch.optim.Adam(autoencoderkl.parameters(), lr=1e-4)
+scaler = torch.amp.GradScaler(device = device)
+
+# Load checkpoint if specified
+start_epoch = 0
+if args.resume_from_checkpoint and os.path.exists(args.resume_from_checkpoint):
+    print(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
+    try:
+        checkpoint = torch.load(args.resume_from_checkpoint, map_location=device)
+        autoencoderkl.load_state_dict(checkpoint["model"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        scaler.load_state_dict(checkpoint["scaler"])
+        start_epoch = checkpoint["epoch"] + 1
+        print(f"Resumed from epoch {start_epoch}, with model loaded from {args.resume_from_checkpoint}")
+    except Exception as e:
+        print(f"Error loading checkpoint: {e}. Starting from scratch.")
+else:
+    print("No checkpoint found or specified. Starting training from scratch.")
+
 
 # Train the VAE on three loss terms: (1) reconstruction loss, (2) K-L divergence loss, (3) hard data facies loss
 # Training parameters
@@ -79,10 +99,6 @@ save_interval = args.autoencoder_train['save_interval']
 kl_weight     = args.autoencoder_train['kl_weight']
 hd_weight     = args.autoencoder_train['hd_weight']
 
-# Gradient parameters (optimizer and scaler)
-optimizer = torch.optim.Adam(autoencoderkl.parameters(), lr=1e-4)
-scaler = torch.amp.GradScaler(device = device)
-
 # Training loop
 
 epoch_losses, log_recons_losses, log_kl_losses, log_hd_losses = [], [], [], []
@@ -90,7 +106,7 @@ val_losses, val_recon_losses, val_kl_losses, val_hd_losses = [], [], [], []
 best_val_loss = 100.
 device_str = "cuda" if device.type == "cuda" else "cpu"
 start_time = time.time()
-for epoch in range(n_epochs):
+for epoch in range(start_epoch, n_epochs + start_epoch):
         
     autoencoderkl.train()
     epoch_recon_loss = 0
@@ -141,7 +157,13 @@ for epoch in range(n_epochs):
     
     hd_str = str(args.autoencoder_train['hd_weight']).replace(".","") if hd_weight <1 else str(int(args.autoencoder_train['hd_weight']))
     if (epoch + 1) % save_interval == 0:
-        torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' +f'/{args.experiment_name}_vae_epoch_{epoch + 1}_hd{hd_str}.pt')
+        checkpoint = {
+            "model": autoencoderkl.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scaler": scaler.state_dict(),
+            "epoch": epoch
+        }
+        torch.save(checkpoint, f'{args.trained_vae_dir}' +f'/{args.experiment_name}_vae_epoch_{epoch + 1}_hd{hd_str}.pt')
 
     if (epoch + 1) % val_interval == 0:
         autoencoderkl.eval()
@@ -180,7 +202,13 @@ for epoch in range(n_epochs):
         print(f" Total val loss: {val_loss}, Recon loss: {val_recon_loss}, KL loss: {val_kl_loss}, HD loss: {val_hd_loss}")
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' + f'/{args.experiment_name}_vae_epoch_hd{hd_str}_best.pt')
+            checkpoint = {
+                "model": autoencoderkl.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scaler": scaler.state_dict(),
+                "epoch": epoch
+            }
+            torch.save(checkpoint, f'{args.trained_vae_dir}' + f'/{args.experiment_name}_vae_epoch_hd{hd_str}_best.pt')
             print(f"Best model saved at epoch {epoch + 1} with val loss: {best_val_loss}")
 end_time = time.time()
 train_logs = {
