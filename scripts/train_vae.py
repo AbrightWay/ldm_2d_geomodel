@@ -34,6 +34,12 @@ parser.add_argument(
     default="./config/config_train_16g.json",
     help="config json file that stores hyper-parameters",
 )
+parser.add_argument(
+    "-n",
+    "--experiment_name",
+    default="1xWellFacies_f8",
+    help="Experiment name to be used for saving the trained VAE model and logs",
+)
 args = parser.parse_args()
 env_dict = json.load(open(args.environment_file, "r"))
 config_dict = json.load(open(args.config_file, "r"))
@@ -52,7 +58,11 @@ set_determinism(1561)
 
 
 # Load dataset
-m_train_loader, m_val_loader,_ = prepare_conditional_geomodel_dataset(args)
+m_train_loader, m_val_loader, _ = prepare_conditional_geomodel_dataset(args,order = 'linear')
+first_batch,_,_ = next(iter(m_train_loader))
+first_val_batch,_,_ = next(iter(m_val_loader))
+print(f"First batch shape: {first_batch.shape}, with {len(m_train_loader)} batches in train_loader")
+print(f"First validation batch shape: {first_val_batch.shape}, with {len(m_val_loader)} batches in val_loader")
 
 # Set hard data conditioning points (first two coordinates are (x,y) points and third coordinate the pixel value)
 hard_data_locations = np.array(args.autoencoder_train['hd_locs'])
@@ -131,7 +141,7 @@ for epoch in range(n_epochs):
     
     hd_str = str(args.autoencoder_train['hd_weight']).replace(".","") if hd_weight <1 else str(int(args.autoencoder_train['hd_weight']))
     if (epoch + 1) % save_interval == 0:
-        torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' + f'/vae_epoch_{epoch + 1}_hd{hd_str}.pt')
+        torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' +f'/{args.experiment_name}_vae_epoch_{epoch + 1}_hd{hd_str}.pt')
 
     if (epoch + 1) % val_interval == 0:
         autoencoderkl.eval()
@@ -170,7 +180,7 @@ for epoch in range(n_epochs):
         print(f" Total val loss: {val_loss}, Recon loss: {val_recon_loss}, KL loss: {val_kl_loss}, HD loss: {val_hd_loss}")
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' + f'/vae_epoch_hd{hd_str}_best.pt')
+            torch.save(autoencoderkl.state_dict(), f'{args.trained_vae_dir}' + f'/{args.experiment_name}_vae_epoch_hd{hd_str}_best.pt')
             print(f"Best model saved at epoch {epoch + 1} with val loss: {best_val_loss}")
 end_time = time.time()
 train_logs = {
@@ -187,7 +197,7 @@ train_logs = {
 
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
-with open(os.path.join(args.log_dir, f"vae_training_log_epochs{n_epochs}_hd{hd_str}.json"), "w") as f:
+with open(os.path.join(args.log_dir, f"{args.experiment_name}_vae_training_log_epochs{n_epochs}_hd{hd_str}.json"), "w") as f:
     json.dump(train_logs, f)
 print(f"Total training time: {(end_time - start_time)//3600}h {(end_time - start_time)%3600//60}m {(end_time - start_time)%60}s")
 progress_bar.close()
