@@ -18,7 +18,8 @@ from utils_main import *
 # Monai and diffusers modules
 torch.backends.cudnn.benchmark = True
 from monai.utils import set_determinism
-
+from rich.console import Console
+from rich.table import Table
 
 # Set directories
 parser = argparse.ArgumentParser(description="PyTorch Object Detection Training")
@@ -48,6 +49,25 @@ for k, v in env_dict.items():
 for k, v in config_dict.items():
     setattr(args, k, v)
 
+# Print loaded configurations
+console = Console()
+table = Table(show_header=True, header_style="bold magenta")
+table.add_column("Configuration", style="dim", width=30)
+table.add_column("Value")
+
+args_dict = vars(args)
+for key, value in args_dict.items():
+    if isinstance(value, dict):
+        # For nested dictionaries, create a sub-table or format nicely
+        sub_table = Table(show_header=False, box=None)
+        for sub_key, sub_value in value.items():
+            sub_table.add_row(f"[cyan]{sub_key}[/cyan]", str(sub_value))
+        table.add_row(f"[bold]{key}[/bold]", sub_table)
+    else:
+        table.add_row(key, str(value))
+
+console.print(table)
+
 if not os.path.exists(args.trained_vae_dir):
     os.makedirs(args.trained_vae_dir)
     
@@ -58,7 +78,8 @@ set_determinism(1561)
 
 
 # Load dataset
-m_train_loader, m_val_loader, _ = prepare_conditional_geomodel_dataset(args,order = 'linear')
+m_train_loader, m_val_loader, _ = prepare_conditional_geomodel_dataset(args,augmentation_level = args.autoencoder_train['augmentation_level'], condition_level = args.autoencoder_train['condition_level'])
+
 first_batch,_,_ = next(iter(m_train_loader))
 first_val_batch,_,_ = next(iter(m_val_loader))
 print(f"First batch shape: {first_batch.shape}, with {len(m_train_loader)} batches in train_loader")
@@ -76,15 +97,15 @@ scaler = torch.amp.GradScaler(device = device)
 
 # Load checkpoint if specified
 start_epoch = 0
-if args.resume_from_checkpoint and os.path.exists(args.resume_from_checkpoint):
-    print(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
+if args.autoencoder_train['ckpt'] and os.path.exists(args.autoencoder_train['ckpt']):
+    print(f"Resuming from checkpoint: {args.autoencoder_train['ckpt']}")
     try:
-        checkpoint = torch.load(args.resume_from_checkpoint, map_location=device)
+        checkpoint = torch.load(args.autoencoder_train['ckpt'], map_location=device)
         autoencoderkl.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         scaler.load_state_dict(checkpoint["scaler"])
         start_epoch = checkpoint["epoch"] + 1
-        print(f"Resumed from epoch {start_epoch}, with model loaded from {args.resume_from_checkpoint}")
+        print(f"Resumed from epoch {start_epoch}, with model loaded from {args.autoencoder_train['ckpt']}")
     except Exception as e:
         print(f"Error loading checkpoint: {e}. Starting from scratch.")
 else:

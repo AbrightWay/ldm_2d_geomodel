@@ -317,11 +317,21 @@ def plot_MSSWD_MDS(real_imgs, fake_imgs, num_groups = 300, num_images_per_group 
     axes[1].set_xlim([plot_lim_min, plot_lim_max])
     axes[1].set_ylim([plot_lim_min, plot_lim_max])                
     real_contr = axes[1].contour(xi_real, yi_real, zi_real.reshape(xi_real.shape), 6, colors='r') 
+
     np.random.seed(seed=seed)
     k_fake_prog = gaussian_kde((coos_fake.T[:, :]))
     xi_fake_prog, yi_fake_prog = np.mgrid[plot_lim_min:plot_lim_max:nbins*1j, plot_lim_min:plot_lim_max:nbins*1j]
     zi_fake_prog = k_fake_prog(np.vstack([xi_fake_prog.flatten(), yi_fake_prog.flatten()]))
     fake_contr_prog = axes[1].contour(xi_fake_prog, yi_fake_prog, zi_fake_prog.reshape(xi_fake_prog.shape), 5, colors='k', linestyles ='dashdot') 
+    
+    ## Calculate density for real images
+    grid_x, grid_y = np.mgrid[plot_lim_min:plot_lim_max:100j, plot_lim_min:plot_lim_max:100j]
+    positions = np.vstack([grid_x.ravel(), grid_y.ravel()])
+    density_real = k_real(positions).reshape(grid_x.shape)
+    density_fake = k_fake_prog(positions).reshape(grid_x.shape)
+    overlap = np.sum(np.minimum(density_real, density_fake))
+    overlap_percentage = overlap / np.sum(density_real) * 100
+    axes[1].text(0.95, 0.95, f'Overlap: {overlap_percentage:.2f}%', transform=axes[1].transAxes, fontsize=10, ha='left',va ='bottom')
     axes[1].set_title('Densityplot')
     # make proxy artists
     train_proxy = mlines.Line2D([], [], color='r', linestyle='solid', label='Real')
@@ -330,7 +340,9 @@ def plot_MSSWD_MDS(real_imgs, fake_imgs, num_groups = 300, num_images_per_group 
     # use them in your legend
     axes[1].legend(handles=[train_proxy, prog_proxy], loc='upper right')
     plt.show()
-    
+    return overlap_percentage
+
+
 def plot_facies_cdf(real_imgs,fake_imgs, n_facies:int=3):
     """
     Plot the CDF of facies proportions for real and generated images.

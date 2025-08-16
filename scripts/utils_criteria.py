@@ -139,7 +139,7 @@ def calculate_variogram_overlap(reals, fakes, Range):
     """
     reals: (B,H,W)
     fakes: (B,H,W)
-    *~150 samples are enough
+    *~150 samples are used in the original paper 
     """
     nlag_new, median_new, iqr_new,Vari1 = calculate_variograms(reals)
     nlag, median_epoch, iqr_epoch,Vari2 = calculate_variograms(fakes)
@@ -149,7 +149,7 @@ def calculate_variogram_overlap(reals, fakes, Range):
     
     overlap = np.where(upper_bound >= lower_bound, True, False)
     
-    Oc = abs((lower_bound * overlap-upper_bound * overlap)[:int(Range/10)]).mean()
-    Tot = abs((iqr_new[0, :]-iqr_new[1, :])[:int(Range/10)]).mean()
+    Oc = abs((lower_bound * overlap-upper_bound * overlap)[:int(Range/10)]).mean() if Range != -1 else abs((lower_bound * overlap-upper_bound * overlap)).mean()
+    Tot = abs((iqr_new[0, :]-iqr_new[1, :])[:int(Range/10)]).mean() if Range != -1 else abs((iqr_new[0, :]-iqr_new[1, :])).mean()
     
     return Oc/Tot*100
